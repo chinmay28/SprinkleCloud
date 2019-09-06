@@ -1,9 +1,6 @@
 import os
 import pickle
 from logging import debug, info
-
-import googleapiclient
-from google.auth.transport import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient import http, errors
 from googleapiclient.discovery import build

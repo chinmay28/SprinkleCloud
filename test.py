@@ -12,11 +12,12 @@ if __name__ == '__main__':
 
     if operation == 'upload':
         print('Compress file {}...'.format(source_file))
-        Zipper.zip(src_file=source_file, dst_file='{}.zip'.format(source_file))
+        Zipper.zip(src_file=source_file, dst_file='{}.zip'.format(source_file), cleanup=False)
         source_file = '{}.zip'.format(source_file)
 
         print('Split file {}...'.format(source_file))
         count = PartManager.split(path=source_file, prefix=source_file)
+        os.remove(source_file)
 
         print('Encrypt {} file parts...'.format(count - 1))
         for i in range(1, count):
