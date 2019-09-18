@@ -2,7 +2,7 @@ import os
 import sys
 
 from encryption import AesCoder
-from cloud_io import GDriveWriter
+from cloud_io import GDriveWriter, DropboxWriter, BoxWriter
 from parts import PartManager, Zipper
 
 if __name__ == '__main__':
@@ -31,16 +31,16 @@ if __name__ == '__main__':
             Zipper.zip(src_file=file_name, dst_file='{}.zip'.format(file_name))
 
         print('Upload {} file parts...'.format(count - 1))
-        gdrive = GDriveWriter()
+        gdrive = BoxWriter()
         for i in range(1, count):
             file_name = '{}_{}.enc.zip'.format(source_file, i)
-            gdrive.put(file_name, file_name, mime_type='application/zip')
+            gdrive.upload(file_name, file_name, mime_type='application/zip')
             os.remove(file_name)
         gdrive.list()
 
     elif operation == 'clean':
         print('Deleting all files...')
-        gdrive = GDriveWriter()
+        gdrive = BoxWriter()
         files = [file_object for file_object in gdrive.list()]
         for file_object in files:
             gdrive.delete(file_object['id'])
@@ -49,7 +49,7 @@ if __name__ == '__main__':
     else:
         source_file = '{}.zip'.format(source_file)
         print('Discover file parts...')
-        gdrive = GDriveWriter()
+        gdrive = BoxWriter()
         files = [file_object for file_object in gdrive.list() if source_file in file_object['name']]
 
         import pprint

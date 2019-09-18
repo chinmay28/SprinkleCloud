@@ -5,6 +5,7 @@ BASE_CLOUD = 'base'
 DROPBOX = 'dropbox'
 GOOGLE_DRIVE = 'gdrive'
 ONEDRIVE = 'onedrive'
+BOX = 'box'
 
 # Get operations
 METADATA = 'meta'

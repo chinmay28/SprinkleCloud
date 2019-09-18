@@ -1,10 +1,13 @@
 import os
 import pickle
 from logging import debug, info
+
+import dropbox
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient import http, errors
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+from boxsdk import DevelopmentClient
 
 from constants import *
 
@@ -32,17 +35,17 @@ class CloudWriter(object):
     def connect(self):
         pass
 
-    def put(self, name, path, mime_type='application/pdf', metadata=None):
-        pass
+    def upload(self, name, path, mime_type='application/pdf', metadata=None):
+        print 'Uploading {}...'.format(path)
 
     def get(self, content):
         pass
 
     def download(self, file_id, local_file_handle):
-        pass
+        print 'Downloading file with id {}...'.format(file_id)
 
     def delete(self, file_id):
-        pass
+        print('Deleting file with path {}'.format(file_id))
 
     def list(self):
         pass
@@ -90,7 +93,7 @@ class GDriveWriter(CloudWriter):
             self.parent_folder_id = self.service.files().create(
                 body=parent_folder, fields='id').execute()
 
-    def put(self, name, path, mime_type='application/pdf', parent_id=None, metadata=None):
+    def upload(self, name, path, mime_type='application/pdf', parent_id=None, metadata=None):
         if metadata:
             metadata.update({'name': name})
         else:
@@ -101,7 +104,7 @@ class GDriveWriter(CloudWriter):
         else:
             metadata['parents'] = [self.parent_folder_id]
 
-        super(GDriveWriter, self).put(name, path)
+        super(GDriveWriter, self).upload(name, path)
 
         media = MediaFileUpload(path, mimetype=mime_type)
         file = self.service.files().create(body=metadata, media_body=media, fields='id').execute()
@@ -110,7 +113,6 @@ class GDriveWriter(CloudWriter):
 
     def delete(self, file_id):
         super(GDriveWriter, self).delete(file_id)
-        print('Deleting file with ID {}'.format(file_id))
         self.service.files().delete(fileId=file_id).execute()
 
     def get(self, file_id):
@@ -154,12 +156,112 @@ class GDriveWriter(CloudWriter):
         return items
 
 
+class DropboxWriter(CloudWriter):
+
+    def __init__(self):
+        super(DropboxWriter, self).__init__()
+        self.name = DROPBOX
+        self.tokens = {
+            'access': 'tokens/{}.pickle'.format(self.name),
+            'credentials': 'tokens/{}_access_token.txt'.format(self.name)
+        }
+
+        self.setup_access()
+        self.connect()
+
+    def setup_access(self):
+        super(DropboxWriter, self).setup_access()
+        if not self.creds:
+            with open(self.tokens['credentials'], 'r') as credentials_file:
+                self.creds = {
+                    'access-token': credentials_file.readline().strip()
+                }
+            with open(self.tokens['access'], 'wb') as token:
+                pickle.dump(self.creds, token)
+
+    def connect(self):
+        super(DropboxWriter, self).connect()
+        self.service = dropbox.Dropbox(self.creds['access-token'])
+
+    def upload(self, name, path, mime_type='application/pdf', parent_id=None, metadata=None):
+        if metadata:
+            metadata.update({'name': name})
+        else:
+            metadata = {'name': name}
+        super(DropboxWriter, self).upload(name, path)
+
+        with open(path, 'rb') as file_handle:
+            file_meta = self.service.files_upload(file_handle.read(),
+                                                  '/{}/{}'.format(self.BASE_FOLDER, name))
+        return file_meta
+
+    def delete(self, file_id):
+        super(DropboxWriter, self).delete(file_id)
+        self.service.files_delete_v2(file_id)
+
+    def get(self, file_id):
+        """ Print a file's metadata. """
+        print 'not implemented!'
+
+    def download(self, file_id, local_file_handle):
+        """ Download a Drive file's content to the local filesystem """
+        super(DropboxWriter, self).download(file_id, local_file_handle)
+        _, response = self.service.files_download(file_id)
+        local_file_handle.write(response.content)
+
+    def list(self, folder_id=None, silent=False):
+        super(DropboxWriter, self).list()
+        if folder_id is None:
+            folder_id = '/{}'.format(self.BASE_FOLDER)
+        files = [{'name': item.name, 'id': '/{}/{}'.format(self.BASE_FOLDER, item.name)}
+                 for item in self.service.files_list_folder(folder_id).entries]
+        return files
+
+
+class BoxWriter(CloudWriter):
+
+    def __init__(self):
+        self.service = DevelopmentClient()
+        self.parent_folder = next(
+            folder_info for folder_info in self.service.root_folder().get_items()
+            if folder_info.name == self.BASE_FOLDER)
+
+    def setup_access(self):
+        pass
+
+    def connect(self):
+        pass
+
+    def upload(self, name, path, mime_type='application/pdf', parent_id=None, metadata=None):
+        super(BoxWriter, self).upload(name, path)
+        return self.parent_folder.upload(file_name=name, file_path=path)
+
+    def delete(self, file_id):
+        super(BoxWriter, self).delete(file_id)
+        self.service.file(file_id).delete()
+
+    def get(self, file_id):
+        """ Print a file's metadata. """
+        print 'not implemented!'
+
+    def download(self, file_id, local_file_handle):
+        """ Download a Drive file's content to the local filesystem """
+        super(BoxWriter, self).download(file_id, local_file_handle)
+        self.service.file(file_id).download_to(local_file_handle)
+
+    def list(self, folder_id=None, silent=False):
+        super(BoxWriter, self).list()
+        files = [{'name': item.name, 'id': item.id}
+                 for item in self.parent_folder.get().item_collection['entries']]
+        return files
+
+
 if __name__ == '__main__':
-    gdrive = GDriveWriter()
-    gdrive.list()
+    dropbox = DropboxWriter()
+    dropbox.list('')
     # gdrive.download(file_id='1Bjh2oomDGJ5dbQMsnPp7aWqdIpV_4_Sp', local_file_handle=open('test.zip', 'wb'))
-    # gdrive.put('TunnelBear', 'TunnelBear.zip', mime_type='application/zip')
+    # gdrive.upload('TunnelBear', 'TunnelBear.zip', mime_type='application/zip')
     # for file_id in ['1qNxaQbJR1OpY9MfqAWvsr8WRv5gBH9Ws', '1X48gq7GKMeSuy9ini_rtaCXJLpVux9x7', '1GLIRPyjT8WQblnVZ3Uqi5rH1OSUhntMu',
     #                 '1Bjh2oomDGJ5dbQMsnPp7aWqdIpV_4_Sp']:
     # gdrive.delete('1dJJt6Jq85lsBmNexUtxBGXKUj7ji9JJq')
-    gdrive.list(folder_id=gdrive.parent_folder_id)
+    # gdrive.list(folder_id=gdrive.parent_folder_id)
