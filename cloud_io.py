@@ -221,6 +221,7 @@ class DropboxWriter(CloudWriter):
 class BoxWriter(CloudWriter):
 
     def __init__(self):
+        self.name = BOX
         self.service = DevelopmentClient()
         self.parent_folder = next(
             folder_info for folder_info in self.service.root_folder().get_items()
@@ -254,6 +255,25 @@ class BoxWriter(CloudWriter):
         files = [{'name': item.name, 'id': item.id}
                  for item in self.parent_folder.get().item_collection['entries']]
         return files
+
+
+class CloudFactory(object):
+
+    CLOUDS = {
+        BOX: BoxWriter,
+        DROPBOX: DropboxWriter,
+        GOOGLE_DRIVE: GDriveWriter
+    }
+
+    @classmethod
+    def get_cloud(cls, name):
+        if name in cls.CLOUDS:
+            return cls.CLOUDS[name]()
+        raise Exception('Cloud {} not supported'.format(name))
+
+    @classmethod
+    def get_all_clouds(cls):
+        return [cls.CLOUDS[name]() for name in cls.CLOUDS]
 
 
 if __name__ == '__main__':
