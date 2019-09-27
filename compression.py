@@ -46,6 +46,7 @@ class Zipper(object):
             zip_ref.extractall(target_dir)
             if cleanup:
                 os.remove(src_file)
+        return src_file[:-4]
 
 
 if __name__ == '__main__':

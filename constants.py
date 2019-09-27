@@ -11,3 +11,7 @@ BOX = 'box'
 METADATA = 'meta'
 CONTENT = 'content'
 DOWNLOAD = 'download'
+
+# special file types
+XOR = 'xor'
+DUP = 'dup'

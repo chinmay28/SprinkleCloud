@@ -78,3 +78,4 @@ class AesCoder(object):
                 outfile.truncate(origsize)
         if cleanup:
             os.remove(in_filename)
+        return out_filename

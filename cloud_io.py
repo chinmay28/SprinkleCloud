@@ -35,7 +35,7 @@ class CloudWriter(object):
     def connect(self):
         pass
 
-    def upload(self, name, path, mime_type='application/pdf', metadata=None):
+    def upload(self, name, path, mime_type='application/zip', metadata=None):
         print 'Uploading {}...'.format(path)
 
     def get(self, content):
@@ -93,7 +93,7 @@ class GDriveWriter(CloudWriter):
             self.parent_folder_id = self.service.files().create(
                 body=parent_folder, fields='id').execute()
 
-    def upload(self, name, path, mime_type='application/pdf', parent_id=None, metadata=None):
+    def upload(self, name, path, mime_type='application/zip', parent_id=None, metadata=None):
         if metadata:
             metadata.update({'name': name})
         else:
@@ -183,7 +183,7 @@ class DropboxWriter(CloudWriter):
         super(DropboxWriter, self).connect()
         self.service = dropbox.Dropbox(self.creds['access-token'])
 
-    def upload(self, name, path, mime_type='application/pdf', parent_id=None, metadata=None):
+    def upload(self, name, path, mime_type='application/zip', parent_id=None, metadata=None):
         if metadata:
             metadata.update({'name': name})
         else:
@@ -233,7 +233,7 @@ class BoxWriter(CloudWriter):
     def connect(self):
         pass
 
-    def upload(self, name, path, mime_type='application/pdf', parent_id=None, metadata=None):
+    def upload(self, name, path, mime_type='application/zip', parent_id=None, metadata=None):
         super(BoxWriter, self).upload(name, path)
         return self.parent_folder.upload(file_name=name, file_path=path)
 
@@ -260,20 +260,20 @@ class BoxWriter(CloudWriter):
 class CloudFactory(object):
 
     CLOUDS = {
-        BOX: BoxWriter,
-        DROPBOX: DropboxWriter,
-        GOOGLE_DRIVE: GDriveWriter
+        BOX: BoxWriter(),
+        DROPBOX: DropboxWriter(),
+        GOOGLE_DRIVE: GDriveWriter()
     }
 
     @classmethod
     def get_cloud(cls, name):
         if name in cls.CLOUDS:
-            return cls.CLOUDS[name]()
+            return cls.CLOUDS[name]
         raise Exception('Cloud {} not supported'.format(name))
 
     @classmethod
     def get_all_clouds(cls):
-        return [cls.CLOUDS[name]() for name in cls.CLOUDS]
+        return [cls.CLOUDS[name] for name in cls.CLOUDS]
 
 
 if __name__ == '__main__':

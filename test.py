@@ -13,13 +13,13 @@ if __name__ == '__main__':
     operation = sys.argv[1]
     encryption_key = '{:$^32}'.format(sys.argv[2])
     source_file = sys.argv[3]
+    source_file_zipped = '{}.zip'.format(source_file)
 
     cloud_writers = CloudFactory.get_all_clouds()
 
     if operation == 'upload':
         print('Compress file {}...'.format(source_file))
         Zipper.zip(src_file=source_file, dst_file='{}.zip'.format(source_file), cleanup=False)
-        source_file_zipped = '{}.zip'.format(source_file)
 
         print('Split file {}...'.format(source_file_zipped))
         count = PartManager.split(path=source_file_zipped, prefix=source_file_zipped)
@@ -53,7 +53,7 @@ if __name__ == '__main__':
             for i, data_file in enumerate(files):
                 writer = connections[i]
                 data_file['cloud'] = writer.name
-                writer.upload(data_file['name'], data_file['name'], mime_type='application/zip')
+                writer.upload(data_file['name'], data_file['name'])
 
         print('Cleaning up temp local files...')
         for _, files in metadata.iteritems():
@@ -84,6 +84,13 @@ if __name__ == '__main__':
 
     else:
         print('Discover file parts...')
+        discovered_files = [file_object for cloud in cloud_writers
+                            for file_object in cloud.list()
+                            if source_file in file_object['name']]
+
+        print('Discovered {} files'.format(len(discovered_files)))
+        pprint.pprint(discovered_files)
+
         with open('metadata.pickle', 'rb') as mfile:
             all_metadata = pickle.load(mfile)
 
@@ -96,26 +103,24 @@ if __name__ == '__main__':
             exit(0)
 
         print('Downloading files...')
-        for key, meta_pair_entries in metadata.iteritems():
-            RecoveryManager.download(meta_pair_entries)
+        file_objects = []
+        for key, meta_pair_values in metadata.iteritems():
+            file_objects.extend(
+                RecoveryManager.download(discovered_files, meta_pair_values, encryption_key)
+            )
 
+        print('Decompress {} part files...'.format(len(file_objects)))
+        for file_obj in file_objects:
+            print('Unzipping {}'.format(file_obj['name']))
+            Zipper.unzip(src_file=file_obj['name'])
 
+        print('Decrypt {} part files...'.format(len(file_objects)))
+        for file_obj in file_objects:
+            AesCoder.decrypt_file(encryption_key, file_obj['name'][:-4],
+                                  out_filename=file_obj['name'][:-8])
 
-        # print('Downloading files...')
-        # for file_obj in files:
-        #     with open(file_obj['name'], 'wb') as part_file:
-        #         gdrive.download(file_id=file_obj['id'], local_file_handle=part_file)
-        #
-        # print('Decompress {} part files...'.format(len(files)))
-        # for i, file_obj in enumerate(files):
-        #     Zipper.unzip(src_file=file_obj['name'])
-        #
-        # print('Decrypt {} part files...'.format(len(files)))
-        # for file_obj in files:
-        #     AesCoder.decrypt_file(encryption_key, file_obj['name'][:-4], out_filename=file_obj['name'][:-8])
-        #
-        # print('Merge {} part files...'.format(len(files)))
-        # PartManager.merge(source_file, source_file, len(files))
-        #
-        # print('Decompress merged file...')
-        # Zipper.unzip(src_file=source_file)
+        print('Merge {} part files...'.format(len(file_objects)))
+        PartManager.merge(source_file_zipped, source_file_zipped, len(file_objects))
+
+        print('Decompress merged file...')
+        Zipper.unzip(src_file=source_file_zipped)
