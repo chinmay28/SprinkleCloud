@@ -1,15 +1,18 @@
-# private_files
-private files on cloud
+# SprinkleCloud
+Redundant and Private Multi-Cloud Storage
 
-## Examples (phase 1):
+## What is it?
 
-python3 test.py upload test123 video_file.mp4
+* A way store your documents, pictures and videos securely online.
+* Eliminate single-vendor dependency and add redundancy.
+* More accounts you add, more benefits you get.
 
-python3 test.py download test123 video_file.mp4
+## Future Work
+* A FUSE implementation can give this a file system interface.
+* Support more vendors and on-prem
+* Versioning and copy and write.
 
-python3 test.py clean test123 dioo
-
-## How to set your accounts up
+## Setup
 1. Google drive
     * Download credentials.json file and copy it to tokens directory as gdrive_credentials.json
       (https://developers.google.com/drive/api/v3/quickstart/go?authuser=1)
