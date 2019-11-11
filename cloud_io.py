@@ -35,8 +35,10 @@ class CloudWriter(object):
     def connect(self):
         pass
 
-    def upload(self, name, path, mime_type='application/zip', metadata=None):
-        print 'Uploading {}...'.format(path)
+    def upload(self, name, path, mime_type='application/zip', metadata=None, cleanup=False):
+        # TODO: implement this cleanly as pre and post upload actions
+        if cleanup:
+            os.remove(path)
 
     def get(self, content):
         pass
@@ -93,7 +95,9 @@ class GDriveWriter(CloudWriter):
             self.parent_folder_id = self.service.files().create(
                 body=parent_folder, fields='id').execute()
 
-    def upload(self, name, path, mime_type='application/zip', parent_id=None, metadata=None):
+    def upload(self, name, path, mime_type='application/zip', parent_id=None,
+               metadata=None, cleanup=False):
+        print 'Uploading {}...'.format(path)
         if metadata:
             metadata.update({'name': name})
         else:
@@ -104,11 +108,10 @@ class GDriveWriter(CloudWriter):
         else:
             metadata['parents'] = [self.parent_folder_id]
 
-        super(GDriveWriter, self).upload(name, path)
-
         media = MediaFileUpload(path, mimetype=mime_type)
         file = self.service.files().create(body=metadata, media_body=media, fields='id').execute()
         debug('File ID: {}'.format(file.get('id')))
+        super(GDriveWriter, self).upload(name, path, cleanup=cleanup)
         return file
 
     def delete(self, file_id):
@@ -183,16 +186,18 @@ class DropboxWriter(CloudWriter):
         super(DropboxWriter, self).connect()
         self.service = dropbox.Dropbox(self.creds['access-token'])
 
-    def upload(self, name, path, mime_type='application/zip', parent_id=None, metadata=None):
+    def upload(self, name, path, mime_type='application/zip', parent_id=None,
+               metadata=None, cleanup=False):
+        print 'Uploading {}...'.format(path)
         if metadata:
             metadata.update({'name': name})
         else:
             metadata = {'name': name}
-        super(DropboxWriter, self).upload(name, path)
 
         with open(path, 'rb') as file_handle:
             file_meta = self.service.files_upload(file_handle.read(),
                                                   '/{}/{}'.format(self.BASE_FOLDER, name))
+        super(DropboxWriter, self).upload(name, path, cleanup=cleanup)
         return file_meta
 
     def delete(self, file_id):
@@ -233,9 +238,13 @@ class BoxWriter(CloudWriter):
     def connect(self):
         pass
 
-    def upload(self, name, path, mime_type='application/zip', parent_id=None, metadata=None):
-        super(BoxWriter, self).upload(name, path)
-        return self.parent_folder.upload(file_name=name, file_path=path)
+    def upload(self, name, path, mime_type='application/zip', parent_id=None,
+               metadata=None, cleanup=False):
+        print 'Uploading {}...'.format(path)
+        file_object = self.parent_folder.upload(file_name=name, file_path=path)
+        super(BoxWriter, self).upload(name, path, cleanup=cleanup)
+        return file_object
+
 
     def delete(self, file_id):
         super(BoxWriter, self).delete(file_id)

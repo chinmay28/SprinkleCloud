@@ -27,7 +27,7 @@ if __name__ == '__main__':
 
         print('Get metadata and prepare redundancy...')
         split_files = ['{}_{}'.format(source_file_zipped, i) for i in xrange(1, count + 1)]
-        metadata = RecoveryManager.get_metadata_file(split_files)
+        metadata = RecoveryManager.setup_file_recovery(split_files)
 
         print 'Metadata:'
         pprint.pprint(metadata)
