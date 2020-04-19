@@ -112,7 +112,7 @@ class GDriveWriter(CloudWriter):
         file = self.service.files().create(body=metadata, media_body=media, fields='id').execute()
         debug('File ID: {}'.format(file.get('id')))
         super(GDriveWriter, self).upload(name, path, cleanup=cleanup)
-        return file
+        return file["id"]
 
     def delete(self, file_id):
         super(GDriveWriter, self).delete(file_id)
@@ -198,7 +198,7 @@ class DropboxWriter(CloudWriter):
             file_meta = self.service.files_upload(file_handle.read(),
                                                   '/{}/{}'.format(self.BASE_FOLDER, name))
         super(DropboxWriter, self).upload(name, path, cleanup=cleanup)
-        return file_meta
+        return file_meta.id
 
     def delete(self, file_id):
         super(DropboxWriter, self).delete(file_id)
@@ -243,8 +243,7 @@ class BoxWriter(CloudWriter):
         print 'Uploading {}...'.format(path)
         file_object = self.parent_folder.upload(file_name=name, file_path=path)
         super(BoxWriter, self).upload(name, path, cleanup=cleanup)
-        return file_object
-
+        return file_object.id
 
     def delete(self, file_id):
         super(BoxWriter, self).delete(file_id)
@@ -281,8 +280,12 @@ class CloudFactory(object):
         raise Exception('Cloud {} not supported'.format(name))
 
     @classmethod
-    def get_all_clouds(cls):
+    def get_cloud_connections(cls):
         return [cls.CLOUDS[name] for name in cls.CLOUDS]
+
+    @classmethod
+    def get_cloud_names(cls):
+        return cls.CLOUDS.keys()
 
 
 if __name__ == '__main__':

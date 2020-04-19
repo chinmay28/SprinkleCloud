@@ -1,278 +1,113 @@
 import os
-import pickle
-import pprint
+import random
 
-import constants as constants
 from cloud_io import CloudFactory
-from compression import Zipper
-from encryption import AesCoder
+from constants import XOR, DUP
+from file_models.file_piece import FilePiece
+
+# Size of split files in bytes
+CHUNK_SIZE = 1024 * 1024
 
 
-class RecoveryManager(object):
+def split_file(filename, prefix=None, cleanup=True):
+    """Splits a given file into a number of pieces."""
+    if not prefix:
+        prefix = filename
+    file_number = 1
+    with open(filename, 'rb') as src_file:
+        chunk = src_file.read(CHUNK_SIZE)
+        while chunk:
+            with open('{}_{}'.format(prefix, file_number), 'wb') as chunk_file:
+                chunk_file.write(chunk)
+            file_number += 1
+            chunk = src_file.read(CHUNK_SIZE)
 
-    SPECIAL_TOKENS = (constants.XOR, constants.DUP)
+    if cleanup:
+        os.remove(filename)
+    return ['{}_{}'.format(prefix, i) for i in xrange(1, file_number)]
 
-    def __init__(self, file_name, cloud_writers, encryption_key):
-        """ We populate remote file pieces and local file metadata,
-        and recover any  pieces that may be missing """
-        self.encryption_key = encryption_key
-        self.source_file_name = file_name
-        self.remote_file_pieces = []
-        self.metadata = {}
-        self.reconstruction_map = {}
 
-        self._discover_remote_file_pieces(file_name, cloud_writers)
-        if not self.remote_file_pieces:
-            raise Exception('File information for {} not found '
-                            'in in remote clouds!'.format(file_name))
+def merge_files(piece_names, destination_filename, cleanup=True):
+    """Merges the given file pieces into one."""
+    with open(destination_filename, 'wb') as dest_file:
+        for piece in piece_names:
+            with open(piece, 'rb') as chunk_file:
+                chunk = chunk_file.read()
+                dest_file.write(chunk)
+                if cleanup:
+                    os.remove(piece)
 
-        self._load_metadata(file_name)
-        if not self.metadata:
-            raise Exception('File information for {} not found '
-                            'in metadata file!'.format(file_name))
 
-        self.reconstruct_files()
+def xor_files(file1, file2, destination_file_handle, cleanup=False):
+    """XORs the given two files onto a destination file handle."""
+    file1_bytes = bytearray(open(file1, 'rb').read())
+    file2_bytes = bytearray(open(file2, 'rb').read())
 
-    def _discover_remote_file_pieces(self, file_name, cloud_writers):
-        print('Discover file parts...')
-        self.remote_file_pieces = [file_object for cloud in cloud_writers
-                                   for file_object in cloud.list()
-                                   if file_name in file_object['name']]
+    if len(file1_bytes) != len(file2_bytes):
+        print(len(file1_bytes), len(file2_bytes))
+        raise Exception('Length of two files not same, we may lose data!')
 
-        print('Discovered {} file pieces'.format(len(self.remote_file_pieces)))
-        pprint.pprint(self.remote_file_pieces)
+    print 'XORing {} and {} of length {} into {}...'.format(
+        file1, file2, len(file1_bytes), destination_file_handle.name)
+    result = bytearray()
+    for i in xrange(len(file1_bytes)):
+        result.append(file1_bytes[i] ^ file2_bytes[i])
 
-    def _load_metadata(self, file_name):
-        print('Loading file metadata...')
-        with open('metadata.pickle', 'rb') as mfile:
-            all_metadata = pickle.load(mfile)
+    destination_file_handle.write(result)
+    if cleanup:
+        os.remove(file1)
+        os.remove(file2)
 
-        self.metadata = all_metadata['files'].get(file_name)
-        print 'File Metadata for {}:'.format(file_name)
-        pprint.pprint(self.metadata)
 
-    def reconstruct_files(self):
-        """ Iterates through local metadata and remote pieces and reconstructs
-        any pieces that might be missing or lost """
-        local_file_names = [file_entry['name'] for entries in self.metadata.values()
-                            for file_entry in entries]
-        if len(local_file_names) == len(self.remote_file_pieces):
-            print('All file pieces intact in the remote clouds. '
-                  'No reconstruction necessary.')
-            return
+def xor_raid4_file_recovery(file_pieces):
+    """XOR based RAID4 file recovery algorithm."""
+    all_clouds = CloudFactory.get_cloud_names()
+    xor_pieces = []
+    dup_pieces = []
 
-        remote_file_names = [piece['name'] for piece in self.remote_file_pieces]
-        self.reconstruction_map = {file_name: file_name in remote_file_names
-                                   for file_name in local_file_names}
-        print('File map for {}:'.format(self.source_file_name))
-        pprint.pprint(self.reconstruction_map)
+    def create_dup_file(file_piece):
+        """Creates duplicate file for recovery."""
+        orig_file_name = file_piece.name
+        dup_file_name = '{}.dup'.format(file_piece.name)
+        with open(orig_file_name, 'rb') as orig, open(dup_file_name, 'wb') as dup:
+            dup.write(orig.read())
 
-        for file_name, file_exists in self.reconstruction_map.iteritems():
-            if not file_exists:
-                self.remote_reconstruct(file_name)
+        dup_piece = FilePiece(dup_file_name, file_pieces[-1].parent_file,
+                              random.choice(all_clouds), piece_type=DUP)
 
-    def remote_reconstruct(self, file_name):
-        """ Reconstructs specific file and puts it back on the remote cloud """
-        print('Reconstructing {}...'.format(file_name))
-        metadata_list = next(entry_list for entry_list in self.metadata.values()
-                             if any(file_name == file_entry['name']
-                                    for file_entry in entry_list))
+        file_piece.siblings = [dup_piece.name]
+        dup_piece.siblings = [file_piece.name]
+        return dup_piece
 
-        # download the supporting files
-        supporting_files = []
-        for file_entry in metadata_list:
-            if file_name == file_entry['name']:
-                continue  # this file is the one we need to reconstruct
-            # TODO: fix inefficient linear id fetching
-            file_id = next(remote_file['id'] for remote_file in self.remote_file_pieces
-                           if remote_file['name'] == file_entry['name'])
+    file_count = len(file_pieces)
+    if file_count and file_count % 2 == 0:
+        # It is very likely the last two pieces are not of the same size.
+        # Let's simply mirror the files.
+        piece1 = create_dup_file(file_pieces[-1])
+        piece2 = create_dup_file(file_pieces[-2])
+        dup_pieces.extend([piece1, piece2])
+        file_count -= 2  # already processed
 
-            # if it is a dup file all we need to do is copy and upload
-            if any(constants.DUP in name for name in [file_entry['name'], file_name]):
-                out_file = file_name
-            else:
-                out_file = file_entry['name']
-            supporting_files.append(file_entry['name'])
+    elif file_count % 2:
+        # we have one last piece that has an unequal size
+        dup_piece = create_dup_file(file_pieces[-1])
+        dup_pieces.append(dup_piece)
+        file_count -= 1  # already processed
 
-            with open(out_file, 'wb') as sfile:
-                CloudFactory.get_cloud(file_entry['cloud']).download(file_id, sfile)
+    for i in xrange(0, file_count, 2):
+        xor_file_name = '{}.xor'.format(file_pieces[i].name)
+        with open(xor_file_name, 'wb') as xor_file:
+            xor_files(file_pieces[i].name, file_pieces[i + 1].name, xor_file)
 
-        if not any(constants.DUP in name for name in [supporting_files[0], file_name]):
-            # unzip
-            unzipped_files = []
-            for sup_file in supporting_files:
-                unzipped_files.append(Zipper.unzip(sup_file))
+        xor_piece = FilePiece(xor_file_name, file_pieces[i].parent_file,
+                              random.choice(all_clouds), piece_type=XOR)
 
-            # decrypt
-            dec_filenames = []
-            for unzip_file in unzipped_files:
-                dec_filenames.append(unzip_file[:-4])
-                AesCoder.decrypt_file(self.encryption_key, unzip_file, unzip_file[:-4])
+        xor_piece.siblings = [file_pieces[i].name, file_pieces[i + 1].name]
+        file_pieces[i].siblings = [file_pieces[i + 1].name, xor_piece.name]
+        file_pieces[i + 1].siblings = [xor_piece.name, file_pieces[i].name]
+        xor_pieces.append(xor_piece)
 
-            bad_file_name = file_name[:-8]
-            with open(bad_file_name, 'wb') as bad_file:
-                self.xor(dec_filenames[0], dec_filenames[1], bad_file, cleanup=True)
+    file_pieces.extend(dup_pieces)
+    file_pieces.extend(xor_pieces)
 
-            # encrypt
-            AesCoder.encrypt_file(self.encryption_key, bad_file_name,
-                                  '{}.enc'.format(bad_file_name))
-            # compress
-            Zipper.zip('{}.enc'.format(bad_file_name),
-                       '{}.enc.zip'.format(bad_file_name))
-            assert file_name == '{}.enc.zip'.format(bad_file_name)
-
-        # upload
-        bad_file = next(file_meta for file_meta in metadata_list
-                        if file_meta['name'] == file_name)
-        cloud_conn = CloudFactory.get_cloud(bad_file['cloud'])
-        # TODO upload to a random cloud and update the metadata
-        cloud_conn.upload(file_name, file_name, cleanup=True)
-
-    @staticmethod
-    def xor(file1, file2, destination_file_handle, cleanup=False):
-        file1_bytes = bytearray(open(file1, 'rb').read())
-        file2_bytes = bytearray(open(file2, 'rb').read())
-
-        if len(file1_bytes) != len(file2_bytes):
-            print(len(file1_bytes), len(file2_bytes))
-            raise Exception('Length of two files not same, we may lose data!')
-
-        print 'XORing {} and {} of length {} into {}...'.format(
-            file1, file2, len(file1_bytes), destination_file_handle.name)
-        result = bytearray()
-        for i in xrange(len(file1_bytes)):
-            result.append(file1_bytes[i] ^ file2_bytes[i])
-
-        destination_file_handle.write(result)
-        if cleanup:
-            os.remove(file1)
-            os.remove(file2)
-
-    @staticmethod
-    def setup_file_recovery(split_files):
-        """ When the file pieces are ready, we setup recovery and generate metadata """
-        metadata_dict = {}
-
-        file_count = len(split_files)
-        if file_count % 2:
-            # duplicate/mirror the file
-            orig_file = split_files[-1]
-            dup_file = '{}.dup'.format(split_files[-1])
-            with open(orig_file, 'rb') as orig, open(dup_file, 'wb') as dup:
-                dup.write(orig.read())
-
-            metadata_dict[split_files[-1]] = [
-                {'name': orig_file},
-                {'name': dup_file},
-            ]
-            file_count -= 1
-
-        for i in xrange(0, file_count, 2):
-            xor_file_name = '{}.xor'.format(split_files[i])
-            with open(xor_file_name, 'wb') as xor_file:
-                RecoveryManager.xor(split_files[i], split_files[i+1], xor_file)
-
-            metadata_dict[split_files[i]] = [
-                {'name': split_files[i]},
-                {'name': split_files[i+1]},
-                {'name': xor_file_name}
-            ]
-
-        return metadata_dict
-
-    @staticmethod
-    def download(discovered_files, meta_pair_values, encryption_key):
-        reconstruct = {}
-        xor_file = next((file_meta for file_meta in meta_pair_values
-                        if constants.XOR in file_meta['name']), None)
-        dup_file = next((file_meta for file_meta in meta_pair_values
-                        if constants.DUP in file_meta['name']), None)
-
-        special_tokens = (constants.XOR, constants.DUP)
-
-        data_files = [entry for entry in meta_pair_values
-                      if all(token not in entry['name'] for token in special_tokens)]
-
-        # try downloading the two files
-        for entry in meta_pair_values:
-            if all(token not in entry['name'] for token in special_tokens):
-
-                matching_file = next((file_object for file_object in discovered_files
-                                     if file_object['name'] == entry['name']), None)
-                if not matching_file:
-                    reconstruct[entry['name']] = True
-                else:
-                    cloud_conn = CloudFactory.get_cloud(entry['cloud'])
-                    with open(entry['name'], 'wb') as dfile:
-                        try:
-                            cloud_conn.download(file_id=matching_file['id'],
-                                                local_file_handle=dfile)
-                        except Exception as exc:
-                            print exc
-                            reconstruct[entry['name']] = True
-                            continue
-
-                    if os.path.getsize(entry['name']) != entry['size']:
-                        reconstruct[entry['name']] = True
-
-        if reconstruct:
-            if len(reconstruct) > 1:
-                raise Exception('More than one file has gone bad. Cannot recover!')
-
-            bad_file_name = reconstruct.keys()[0]
-            print('Reconstructing {}...'.format(bad_file_name))
-
-            if dup_file:
-                matching_file = next(file_object for file_object in discovered_files
-                                     if file_object['name'] == dup_file['name'])
-                cloud_conn = CloudFactory.get_cloud(dup_file['cloud'])
-
-                with open(bad_file_name, 'wb') as bad_file:
-                    cloud_conn.download(file_id=matching_file['id'], local_file_handle=bad_file)
-
-            elif xor_file:
-                good_file = next(file_meta for file_meta in meta_pair_values
-                                 if file_meta['name'] != bad_file_name)
-
-                matching_file = next(file_object for file_object in discovered_files
-                                     if file_object['name'] == xor_file['name'])
-
-                cloud_conn = CloudFactory.get_cloud(xor_file['cloud'])
-                with open(xor_file['name'], 'wb') as xor:
-                    cloud_conn.download(file_id=matching_file['id'], local_file_handle=xor)
-
-                if os.path.getsize(xor_file['name']) != xor_file['size']:
-                    raise Exception('XOR file may be corrupted. Expected size {}, actual size: {}'
-                                    .format(os.path.getsize(xor_file['name']), xor_file['size']))
-
-                # unzip
-                xor_file_name = Zipper.unzip(xor_file['name'])
-                good_file_name = Zipper.unzip(good_file['name'], cleanup=False)
-
-                # decrypt
-                xor_file_name = AesCoder.decrypt_file(
-                    encryption_key, xor_file_name, xor_file_name[:-4])
-                good_file_name = AesCoder.decrypt_file(
-                    encryption_key, good_file_name, good_file_name[:-4])
-
-                bad_file_name = bad_file_name[:-8]
-                with open(bad_file_name, 'wb') as bad_file:
-                    RecoveryManager.xor(good_file_name, xor_file_name, bad_file)
-                os.remove(xor_file_name)
-
-                # encrypt
-                AesCoder.encrypt_file(encryption_key, bad_file_name,
-                                      '{}.enc'.format(bad_file_name))
-                # compress
-                Zipper.zip('{}.enc'.format(bad_file_name), '{}.enc.zip'.format(bad_file_name))
-
-                # upload
-                bad_file = next(file_meta for file_meta in meta_pair_values
-                                if file_meta['name'] == '{}.enc.zip'.format(bad_file_name))
-                cloud_conn = CloudFactory.get_cloud(bad_file['cloud'])
-                # TODO upload to a random cloud and update the metadata
-                cloud_conn.upload(bad_file['name'], bad_file['name'])
-            else:
-                print('Reconstruction failed. Redundant file not found!')
-
-        return data_files
+    return file_pieces

@@ -1,4 +1,4 @@
-
+DEFAULT_ENCRYPTION_KEY = "my$PR1NKL3F1L3"
 
 # CloudWriter names
 BASE_CLOUD = 'base'
@@ -12,6 +12,7 @@ METADATA = 'meta'
 CONTENT = 'content'
 DOWNLOAD = 'download'
 
-# special file types
+# file piece types
 XOR = 'xor'
 DUP = 'dup'
+REGULAR = 'regular'
