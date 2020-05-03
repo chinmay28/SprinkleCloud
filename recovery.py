@@ -72,8 +72,9 @@ def xor_raid4_file_recovery(file_pieces):
         with open(orig_file_name, 'rb') as orig, open(dup_file_name, 'wb') as dup:
             dup.write(orig.read())
 
+        target_cloud = next(cloud for cloud in all_clouds if cloud != file_piece.cloud)
         dup_piece = FilePiece(dup_file_name, file_pieces[-1].parent_file,
-                              random.choice(all_clouds), piece_type=DUP)
+                              target_cloud, piece_type=DUP)
 
         file_piece.siblings = [dup_piece.name]
         dup_piece.siblings = [file_piece.name]
@@ -99,8 +100,11 @@ def xor_raid4_file_recovery(file_pieces):
         with open(xor_file_name, 'wb') as xor_file:
             xor_files(file_pieces[i].name, file_pieces[i + 1].name, xor_file)
 
+        clouds_taken = (file_pieces[i].cloud, file_pieces[i+1].cloud)
+        target_cloud = next(cloud for cloud in all_clouds
+                            if all(cloud != taken for taken in clouds_taken))
         xor_piece = FilePiece(xor_file_name, file_pieces[i].parent_file,
-                              random.choice(all_clouds), piece_type=XOR)
+                              target_cloud, piece_type=XOR)
 
         xor_piece.siblings = [file_pieces[i].name, file_pieces[i + 1].name]
         file_pieces[i].siblings = [file_pieces[i + 1].name, xor_piece.name]

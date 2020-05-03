@@ -1,9 +1,7 @@
-import os
-import pickle
 import pprint
 import time
 
-from cloud_io import CloudFactory
+from cloud_io import CloudFactory, Metadata
 from file_models.sprinkle_file import SprinkleFile
 
 
@@ -24,22 +22,15 @@ if __name__ == '__main__':
         files = [file_object for file_object in conn.list()]
         for file_object in files:
             conn.delete(file_object['id'])
-        conn.list()
-    if os.path.exists('metadata.pickle'):
-        os.remove('metadata.pickle')
 
     # upload
+    metadata = {}
     for source_file in source_files:
         sfile = SprinkleFile(source_file, encryption_key=encryption_key)
         sfile.upload()
-        metadata = {}
-        if os.path.exists('metadata.pickle'):
-            with open('metadata.pickle', 'rb') as metafile:
-                metadata = pickle.load(metafile)
+        metadata = Metadata.load()
         metadata[source_file] = sfile.metadata
-
-        with open('metadata.pickle', 'wb') as metafile:
-            pickle.dump(metadata, metafile)
+        Metadata.store(metadata)
 
     print("*"*20)
     print("File metadata")
@@ -48,10 +39,8 @@ if __name__ == '__main__':
     print("*" * 20)
 
     # download
-    metadata = {}
     for source_file in source_files:
-        with open('metadata.pickle', 'rb') as metafile:
-            metadata = pickle.load(metafile)
+        metadata = Metadata.load()
 
         dfile = SprinkleFile(source_file, metadata=metadata[source_file],
                              encryption_key=encryption_key)

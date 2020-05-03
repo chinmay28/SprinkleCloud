@@ -50,6 +50,7 @@ class AesCoder(object):
                     outfile.write(encryptor.encrypt(chunk))
         if cleanup:
             os.remove(in_filename)
+        return out_filename
 
     @staticmethod
     def decrypt_file(key, in_filename, out_filename=None, chunksize=24*1024, cleanup=True):

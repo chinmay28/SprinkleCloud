@@ -9,7 +9,9 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from boxsdk import DevelopmentClient
 
+from compression import unzip_file, zip_file
 from constants import *
+from encryption import AesCoder
 
 
 class CloudWriter(object):
@@ -156,7 +158,7 @@ class GDriveWriter(CloudWriter):
                 print('Files:')
                 for item in items:
                     print(u'{0} ({1})'.format(item['name'], item['id']))
-        return items
+        return items if items else []
 
 
 class DropboxWriter(CloudWriter):
@@ -286,6 +288,64 @@ class CloudFactory(object):
     @classmethod
     def get_cloud_names(cls):
         return cls.CLOUDS.keys()
+
+
+class Metadata(object):
+    # TODO: this should subclass dict
+
+    FILENAME = "metadata.pickle"
+    CLOUD_ALIAS = "{}.enc.zip".format(FILENAME)
+    ENCRYPTION_KEY = "{:$^32}".format(METADATA_ENCRYTPION_KEY)
+
+    @classmethod
+    def load(cls):
+        """Loads the metadata from the cloud."""
+        for cloud_conn in CloudFactory.get_cloud_connections():
+
+            try:
+                metadata_file = next((file_object for file_object in cloud_conn.list()
+                                      if file_object['name'] == cls.CLOUD_ALIAS), None)
+            except TypeError:
+                # TODO: this is stupid
+                continue
+
+            if metadata_file:
+                with open(metadata_file['name'], 'wb') as zipped_file:
+                    cloud_conn.download(metadata_file['id'], zipped_file)
+
+                encrypted_filename = unzip_file(metadata_file['name'])
+                AesCoder.decrypt_file(key=cls.ENCRYPTION_KEY,
+                                      in_filename=encrypted_filename, out_filename=cls.FILENAME)
+                break
+        else:
+            print('Metadata file could not be found on any clouds!')
+            return {}
+
+        with open(cls.FILENAME, 'rb') as meta_file:
+            meta = pickle.load(meta_file)
+
+        return meta
+
+    @classmethod
+    def store(cls, metadata_dict):
+        """Stores the metadata onto the clouds."""
+        with open(cls.FILENAME, 'wb') as metadata_file:
+            pickle.dump(metadata_dict, metadata_file)
+
+        encrypted_filename = AesCoder.encrypt_file(cls.ENCRYPTION_KEY, in_filename=cls.FILENAME)
+        zip_file(encrypted_filename, dst_file=cls.CLOUD_ALIAS)
+
+        for cloud_conn in CloudFactory.get_cloud_connections():
+            try:
+                metadata_file = next((file_object for file_object in cloud_conn.list()
+                                      if file_object['name'] == cls.CLOUD_ALIAS), None)
+            except TypeError:
+                # TODO: this is stupid
+                metadata_file = None
+
+            if metadata_file:
+                cloud_conn.delete(metadata_file['id'])
+            cloud_conn.upload(cls.CLOUD_ALIAS, cls.CLOUD_ALIAS)
 
 
 if __name__ == '__main__':
