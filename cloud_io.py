@@ -208,7 +208,11 @@ class DropboxWriter(CloudWriter):
 
     def get(self, file_id):
         """ Print a file's metadata. """
-        print 'not implemented!'
+        # TODO find a better, faster way to do this
+        for entry in self.list():
+            if entry['id'] == file_id:
+                return entry
+        raise Exception('File with id {} Not found!'.format(file_id))
 
     def download(self, file_id, local_file_handle):
         """ Download a Drive file's content to the local filesystem """
@@ -220,7 +224,8 @@ class DropboxWriter(CloudWriter):
         super(DropboxWriter, self).list()
         if folder_id is None:
             folder_id = '/{}'.format(self.BASE_FOLDER)
-        files = [{'name': item.name, 'id': '/{}/{}'.format(self.BASE_FOLDER, item.name)}
+        files = [{'name': item.name, 'id': item.id,
+                  'path': '/{}/{}'.format(self.BASE_FOLDER, item.name)}
                  for item in self.service.files_list_folder(folder_id).entries]
         return files
 
@@ -253,7 +258,8 @@ class BoxWriter(CloudWriter):
 
     def get(self, file_id):
         """ Print a file's metadata. """
-        print 'not implemented!'
+        file_object = self.service.file(file_id).get()
+        return {'id': file_object.id, 'name': file_object.name}
 
     def download(self, file_id, local_file_handle):
         """ Download a Drive file's content to the local filesystem """
@@ -349,8 +355,10 @@ class Metadata(object):
 
 
 if __name__ == '__main__':
-    dropbox = DropboxWriter()
-    dropbox.list('')
+    drive = DropboxWriter()
+    import pprint
+    pprint.pprint(drive.get('JyjNdS08-9AAAAAAAAADZQ'))
+    # pprint.pprint(Metadata.load())
     # gdrive.download(file_id='1Bjh2oomDGJ5dbQMsnPp7aWqdIpV_4_Sp', local_file_handle=open('test.zip', 'wb'))
     # gdrive.upload('TunnelBear', 'TunnelBear.zip', mime_type='application/zip')
     # for file_id in ['1qNxaQbJR1OpY9MfqAWvsr8WRv5gBH9Ws', '1X48gq7GKMeSuy9ini_rtaCXJLpVux9x7', '1GLIRPyjT8WQblnVZ3Uqi5rH1OSUhntMu',

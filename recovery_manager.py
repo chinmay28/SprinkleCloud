@@ -1,5 +1,4 @@
 import os
-import random
 
 from cloud_io import CloudFactory
 from constants import XOR, DUP
@@ -115,3 +114,36 @@ def xor_raid4_file_recovery(file_pieces):
     file_pieces.extend(xor_pieces)
 
     return file_pieces
+
+
+def reconstruct(file_piece, metadata, encryption_key):
+    """Reconstruct a lost piece with sibling pieces"""
+    print("Reconstructing {} from its sibling(s) {}..."
+          .format(file_piece.name, file_piece.siblings))
+    siblings = []
+    for sibling_name in file_piece.siblings:
+        sibling_meta = metadata['pieces'][sibling_name]
+        sibling = FilePiece(sibling_name, file_piece.parent_file, metadata=sibling_meta)
+        if not sibling.exists_in_cloud:
+            raise Exception('Data loss detected! Sibling could not be found on cloud.')
+        sibling.download()
+        sibling.unzip()
+        sibling.decrypt(encryption_key)
+        siblings.append(sibling)
+
+    if len(siblings) == 2:
+        with open(file_piece.name, 'wb') as xor_file:
+            xor_files(siblings[0].name, siblings[1].name, xor_file)
+
+    elif len(siblings) == 1:
+        with open(file_piece.name, 'wb') as missing_file:
+            with open(siblings[0].name, 'rb') as dup_file:
+                missing_file.write(dup_file.read())
+    else:
+        raise Exception("Invalid sibling configuration found! Siblings: {}."
+                        .format(file_piece.siblings))
+
+    file_piece.encrypt(encryption_key=encryption_key)
+    file_piece.zip()
+    file_piece.upload()
+    return file_piece.metadata

@@ -21,29 +21,51 @@ class FilePiece(object):
         self.piece_type = piece_type
         self.metadata = metadata
 
-        self._files_to_cleanup = {self.name}
-        self.cloud_connection = None
+        self._files_to_cleanup = set()
         self.cloud_alias = "blah"
         self.encryption = "AES"  # for applying a behavioral pattern
+
+        self.siblings = []
 
         if metadata:
             self.cloud = metadata["cloud"]
             self.piece_type = metadata["piece_type"]
             self.cloud_alias = metadata["cloud_alias"]
+            self.siblings = metadata["siblings"]
 
-        self.siblings = []
+        self.available_locally = False
+
+    @property
+    def cloud_connection(self):
+        return CloudFactory.get_cloud(self.cloud)
+
+    @property
+    def exists_in_cloud(self):
+        """Checks if the file exists in cloud"""
+        if not self.metadata:
+            return False
+        try:
+            _ = self.cloud_connection.get(self.metadata["file_id"])['id']
+            return True
+        except Exception as exc:
+            tokens = ('item is trashed', 'not found')
+            if any(token in str(exc).lower() for token in tokens):
+                return False
+            raise
 
     def encrypt(self, encryption_key):
         """Encrypts the file piece"""
         print "Encrypting {} to {}...".format(self.name, self.encrypted_name)
         AesCoder.encrypt_file(encryption_key, in_filename=self.name,
                               out_filename=self.encrypted_name)
+        self.available_locally = False
 
     def decrypt(self, encryption_key):
         """Decrypts the file piece"""
         print "Decrypting {} to {}...".format(self.encrypted_name, self.name)
         AesCoder.decrypt_file(encryption_key, self.encrypted_name,
                               out_filename=self.name)
+        self.available_locally = True
 
     def zip(self):
         """compresses the encrypted file piece"""
@@ -55,7 +77,6 @@ class FilePiece(object):
 
     def upload(self):
         """Uploads the file piece"""
-        self.cloud_connection = CloudFactory.get_cloud(self.cloud)
         file_id = self.cloud_connection.upload(self.zipped_name, self.zipped_name)
         self.metadata = {
             "cloud": self.cloud,
@@ -71,7 +92,6 @@ class FilePiece(object):
         if not self.metadata or not self.metadata["file_id"]:
             raise Exception("Required metadata not found!")
 
-        self.cloud_connection = CloudFactory.get_cloud(self.cloud)
         with open(self.zipped_name, "wb") as zipped_file:
             self.cloud_connection.download(file_id=self.metadata["file_id"],
                                            local_file_handle=zipped_file)

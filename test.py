@@ -1,4 +1,5 @@
 import pprint
+import random
 import time
 
 from cloud_io import CloudFactory, Metadata
@@ -37,6 +38,13 @@ if __name__ == '__main__':
     print("*" * 20)
     pprint.pprint(metadata)
     print("*" * 20)
+
+    # Fail random piece each from the source files:
+    for source_file in source_files:
+        piece_name = random.choice(metadata[source_file]["merge_order"])
+        print("Deleting {} to fail a piece.".format(piece_name))
+        piece_meta = metadata[source_file]["pieces"][piece_name]
+        CloudFactory.get_cloud(piece_meta["cloud"]).delete(piece_meta["file_id"])
 
     # download
     for source_file in source_files:
